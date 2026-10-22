@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from gpu_data import get_all_machine_types_info, get_zones_for_machine_type, MACHINE_TYPES, get_chip_groups, TPU_TYPES
+from gpu_data import get_all_machine_types_info, get_zones_for_machine_type, MACHINE_TYPES, get_chip_groups, TPU_TYPES, is_valid_machine_type
 from advisory import get_calendar_advisory, get_spot_advisory, find_best_splits, get_flex_advisory
 from hunter import (
     create_session, cancel_session, get_session,
@@ -72,8 +72,8 @@ def _require_user_token(user_token: Optional[str]):
         )
 
 app = FastAPI(
-    title="GPU Radar",
-    description="Priority-based GPU capacity hunting tool for Google Cloud",
+    title="SuperDry Capacity Agent",
+    description="Priority-based compute capacity hunting tool for Google Cloud",
     version="1.0.0",
 )
 
@@ -547,10 +547,8 @@ async def websocket_scan(websocket: WebSocket):
                     })
                     continue
 
-                # Validate machine type (GPU or TPU)
-                is_valid_tpu = any(scan_req.machineType in t.get("machine_types", {})
-                                   for t in TPU_TYPES.values())
-                if scan_req.machineType not in MACHINE_TYPES and not is_valid_tpu:
+                # Validate machine type (GPU, TPU, CPU, or custom GCE machine type)
+                if not is_valid_machine_type(scan_req.machineType):
                     await websocket.send_json({
                         "type": "error",
                         "message": f"Unknown machine type: {scan_req.machineType}",

@@ -62,9 +62,27 @@ export default function AdvisoryPanel({ machineTypes = [], loading: mtLoading, p
   const [flexLoading, setFlexLoading] = useState(false)
   const [flexError, setFlexError] = useState(null)
 
+  const allKnownZones = useMemo(() => {
+    const zSet = new Set()
+    machineTypes.forEach(mt => (mt.zones || []).forEach(z => zSet.add(z)))
+    return Array.from(zSet).sort()
+  }, [machineTypes])
+
   const selectedMachineInfo = useMemo(() => {
-    return machineTypes.find(mt => mt.machineType === machineType)
-  }, [machineType, machineTypes])
+    if (!machineType) return null
+    const found = machineTypes.find(mt => mt.machineType === machineType)
+    if (found) return found
+    return {
+      machineType,
+      family: 'Custom',
+      category: 'Custom',
+      gpu: 'Custom GCE Machine Type',
+      chip: 'Custom',
+      gpuCount: 0,
+      zones: allKnownZones,
+      supported: { on_demand: true, spot: true, dws_calendar: true, dws_flex: true },
+    }
+  }, [machineType, machineTypes, allKnownZones])
 
   const availableZones = useMemo(() => selectedMachineInfo?.zones || [], [selectedMachineInfo])
 
@@ -215,7 +233,7 @@ export default function AdvisoryPanel({ machineTypes = [], loading: mtLoading, p
           Capacity Advisory
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Check GPU availability using DWS Calendar Mode, Spot VM, and DWS Flex Start Advisory APIs.
+          Check GPU, TPU, and CPU capacity availability using DWS Calendar Mode, Spot VM, and DWS Flex Start Advisory APIs.
         </Typography>
       </Box>
 

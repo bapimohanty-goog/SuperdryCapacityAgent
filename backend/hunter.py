@@ -16,7 +16,8 @@ from enum import Enum
 
 from gpu_data import (
     MACHINE_TYPES, get_zones_for_machine_type, is_consumption_supported,
-    FAMILY_TO_GPU_ZONE_KEY, MACHINE_TO_FAMILY, GPU_ZONES
+    FAMILY_TO_GPU_ZONE_KEY, MACHINE_TO_FAMILY, GPU_ZONES,
+    is_valid_machine_type, get_gce_machine_type, infer_family_from_machine_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -285,13 +286,10 @@ class ScanningSession:
         self.status = ScanningStatus.RUNNING
         mode_label = "⚡ PARALLEL" if parallel else "📋 SEQUENTIAL"
         await self.emit("start",
-            f"🚀 Starting GPU scan for {self.vm_count}x {self.machine_type} ({mode_label} mode)")
+            f"🚀 Starting capacity scan for {self.vm_count}x {self.machine_type} ({mode_label} mode)")
 
-        # Validate machine type (GPU or TPU)
-        from gpu_data import TPU_TYPES
-        is_tpu = any(self.machine_type in tpu.get("machine_types", {})
-                      for tpu in TPU_TYPES.values())
-        if self.machine_type not in MACHINE_TYPES and not is_tpu:
+        # Validate machine type (GPU, TPU, CPU, or custom GCE machine type)
+        if not is_valid_machine_type(self.machine_type):
             self.status = ScanningStatus.FAILED
             await self.emit("error",
                 f"❌ Unknown machine type: {self.machine_type}.")
@@ -305,12 +303,23 @@ class ScanningSession:
             await self.emit("error", f"❌ Authentication failed: {str(e)}")
             return
 
-        family = MACHINE_TO_FAMILY.get(self.machine_type)
-        if family:
-            await self.emit("info",
-                f"📋 Machine family: {family} | GPU: {MACHINE_TYPES[self.machine_type]['gpu']}")
-        else:
+        family = MACHINE_TO_FAMILY.get(self.machine_type) or infer_family_from_machine_type(self.machine_type)
+        if self.machine_type in MACHINE_TYPES:
+            mt_info = MACHINE_TYPES[self.machine_type]
+            cat = mt_info.get("category", "GPU")
+            if cat == "GPU":
+                await self.emit("info",
+                    f"📋 Machine family: {family} | GPU: {mt_info['gpu']} ({mt_info.get('gpu_count', 1)}x)")
+            else:
+                vcpus = mt_info.get("vcpus", "")
+                mem = mt_info.get("memory_gb", "")
+                spec_str = f" | {vcpus} vCPUs, {mem} GB RAM" if vcpus else ""
+                await self.emit("info",
+                    f"📋 Machine family: {family} ({cat}) | Processor: {mt_info['gpu']}{spec_str}")
+        elif self._is_tpu_type():
             await self.emit("info", f"📋 Machine type: {self.machine_type} (TPU)")
+        else:
+            await self.emit("info", f"📋 Machine type: {self.machine_type} (Custom / {family or 'GCE'})")
 
         if parallel:
             await self._run_parallel()
@@ -342,10 +351,17 @@ class ScanningSession:
                 continue
 
             supported_zones = get_zones_for_machine_type(self.machine_type)
-            valid_zones = [z for z in zones if z in supported_zones]
-            skipped = [z for z in zones if z not in supported_zones]
-            for z in skipped:
-                await self.emit("warning", f"⚠️ Zone {z} not supported for {self.machine_type}. Skipping.")
+            if not zones:
+                valid_zones = list(supported_zones)
+            else:
+                valid_zones = [z for z in zones if z in supported_zones]
+                skipped = [z for z in zones if z not in supported_zones]
+                if not valid_zones and self.machine_type not in MACHINE_TYPES and not self._is_tpu_type():
+                    # Custom machine type with user-specified zones: allow them directly
+                    valid_zones = list(zones)
+                    skipped = []
+                for z in skipped:
+                    await self.emit("warning", f"⚠️ Zone {z} not supported for {self.machine_type}. Skipping.")
 
             if not valid_zones:
                 await self.emit("warning",
@@ -394,7 +410,12 @@ class ScanningSession:
             if not is_consumption_supported(self.machine_type, method):
                 await self.emit("warning", f"⚠️ {method_label} not supported. Skipping.")
                 continue
-            valid_zones = [z for z in zones if z in supported_zones]
+            if not zones:
+                valid_zones = list(supported_zones)
+            else:
+                valid_zones = [z for z in zones if z in supported_zones]
+                if not valid_zones and self.machine_type not in MACHINE_TYPES and not self._is_tpu_type():
+                    valid_zones = list(zones)
             if not valid_zones:
                 await self.emit("warning", f"⚠️ No valid zones for {method_label}. Skipping.")
                 continue
@@ -568,6 +589,22 @@ class ScanningSession:
             return f"{prefix}-{method_tag}-{short_id}-{short_zone}"[:63]
         return f"gpu-radar-{method_tag}-{short_id}-{short_zone}"[:63]
 
+    def _build_reservation_instance_properties(self) -> dict:
+        """Build instanceProperties for GCE reservations and future reservations.
+        Resolves synthetic machine type keys (e.g. n1-standard-4-t4 -> n1-standard-4)
+        and attaches guestAccelerators for N1 GPU configs."""
+        gce_mt = get_gce_machine_type(self.machine_type)
+        props = {"machineType": gce_mt}
+        machine_info = MACHINE_TYPES.get(self.machine_type, {})
+        family = machine_info.get("family", "")
+        accel_type = machine_info.get("accelerator_type")
+        if accel_type and family.startswith("N1"):
+            props["guestAccelerators"] = [{
+                "acceleratorType": accel_type,
+                "acceleratorCount": machine_info.get("gpu_count", 1),
+            }]
+        return props
+
     async def _try_on_demand_rest(self, zone: str, name_prefix: str = "") -> bool:
         """Create on-demand reservation and poll operation to verify."""
         res_name = self._make_name(name_prefix, "od", zone)
@@ -582,7 +619,7 @@ class ScanningSession:
             "name": res_name,
             "specificReservation": {
                 "count": str(self.vm_count),
-                "instanceProperties": {"machineType": self.machine_type}
+                "instanceProperties": self._build_reservation_instance_properties(),
             },
             "specificReservationRequired": True,
             "resourcePolicies": {},
@@ -655,7 +692,7 @@ class ScanningSession:
             "namePrefix": prefix_tag,
             "specificSkuProperties": {
                 "totalCount": str(self.vm_count),
-                "instanceProperties": {"machineType": self.machine_type}
+                "instanceProperties": self._build_reservation_instance_properties(),
             },
             "timeWindow": {"startTime": start_str, "endTime": end_str},
             "shareSettings": {"shareType": "LOCAL"},
@@ -750,14 +787,12 @@ class ScanningSession:
 
     def _family_supports_on_demand(self) -> bool:
         """Check if the current machine type's family supports on-demand reservations."""
-        from gpu_data import CONSUMPTION_SUPPORT
-        family = MACHINE_TO_FAMILY.get(self.machine_type, "")
-        return CONSUMPTION_SUPPORT.get("on_demand", {}).get(family, False)
+        return is_consumption_supported(self.machine_type, "on_demand")
 
     async def _try_dws_flex_rest(self, zone: str, name_prefix: str = "",
                                   flex_max_wait_hours: int = 168,
                                   flex_usage_duration_hours: int = 24) -> bool:
-        """GPU DWS Flex: For families that support on-demand reservations, try a standard
+        """GPU/CPU DWS Flex: For families that support on-demand reservations, try a standard
         reservation with auto-delete. For families that don't (A4, A3 Ultra, A4X Max),
         use future reservations which is the proper DWS Flex mechanism."""
         # Families without on-demand support need future reservations for DWS Flex
@@ -781,7 +816,7 @@ class ScanningSession:
             "name": res_name,
             "specificReservation": {
                 "count": str(self.vm_count),
-                "instanceProperties": {"machineType": self.machine_type}
+                "instanceProperties": self._build_reservation_instance_properties(),
             },
             "specificReservationRequired": True,
             "deleteAtTime": end_str,
@@ -849,7 +884,7 @@ class ScanningSession:
             "namePrefix": prefix_tag,
             "specificSkuProperties": {
                 "totalCount": str(self.vm_count),
-                "instanceProperties": {"machineType": self.machine_type}
+                "instanceProperties": self._build_reservation_instance_properties(),
             },
             "timeWindow": {"startTime": start_str, "endTime": end_str},
             "shareSettings": {"shareType": "LOCAL"},
@@ -1056,17 +1091,16 @@ class ScanningSession:
         return family.startswith(("A3", "A4"))
 
     async def _try_spot_rest(self, zone: str, name_prefix: str = "") -> bool:
-        """Create Spot VM(s) and poll operation to verify. Creates vm_count instances
-        for accelerator-optimized families, or 1 instance for standard GPU types."""
+        """Create Spot VM(s) and poll operation to verify. Creates vm_count instances."""
         token = await self._get_token()
         machine_info = MACHINE_TYPES.get(self.machine_type, {})
+        gce_mt = get_gce_machine_type(self.machine_type)
+        family = MACHINE_TO_FAMILY.get(self.machine_type) or infer_family_from_machine_type(self.machine_type)
         network = await self._get_network(token, zone)
         subnetwork = await self._get_gpu_subnetwork(token, zone)
         is_accel_opt = self._is_accelerator_optimized()
 
-
-        # Accelerator-optimized families (A3/A4) have specific requirements
-        spot_count = self.vm_count if is_accel_opt else 1
+        spot_count = max(1, self.vm_count)
 
         created = []
         for i in range(spot_count):
@@ -1087,7 +1121,7 @@ class ScanningSession:
                 # use HPC VM image, no guestAccelerators
                 body = {
                     "name": inst_name,
-                    "machineType": f"zones/{zone}/machineTypes/{self.machine_type}",
+                    "machineType": f"zones/{zone}/machineTypes/{gce_mt}",
                     "scheduling": {
                         "provisioningModel": "SPOT",
                         "instanceTerminationAction": "STOP",
@@ -1108,11 +1142,38 @@ class ScanningSession:
                     }],
                 }
             else:
+                # Determine boot image, disk type, and NIC type for GPU (G2, A2, N1) and all CPU families
+                is_arm = family in ("C4A", "T2A") or gce_mt.lower().startswith(("c4a-", "t2a-"))
+                source_image = (
+                    "projects/debian-cloud/global/images/family/debian-12-arm64"
+                    if is_arm else
+                    "projects/debian-cloud/global/images/family/debian-12"
+                )
+                hyperdisk_families = ("C4", "C4A", "C4D", "N4", "H3", "M4", "X4", "Z3")
+                gvnic_families = ("C3", "C3D", "C4", "C4A", "C4D", "N4", "H3", "M3", "M4", "X4", "Z3", "G2", "A2")
+                needs_hyperdisk = family in hyperdisk_families or gce_mt.lower().startswith(
+                    ("c4-", "c4a-", "c4d-", "n4-", "h3-", "m4-", "x4-", "z3-")
+                )
+                needs_gvnic = family in gvnic_families or needs_hyperdisk or gce_mt.lower().startswith(
+                    ("c3-", "c3d-", "m3-")
+                )
+                disk_type = (
+                    f"zones/{zone}/diskTypes/hyperdisk-balanced"
+                    if needs_hyperdisk else
+                    f"zones/{zone}/diskTypes/pd-balanced"
+                )
 
-                # Standard GPU families (G2, A2): need guestAccelerators
+                net_iface = {
+                    "network": network,
+                    **({"subnetwork": subnetwork} if subnetwork else {}),
+                    "accessConfigs": [{"type": "ONE_TO_ONE_NAT", "name": "External NAT"}],
+                }
+                if needs_gvnic:
+                    net_iface["nicType"] = "GVNIC"
+
                 body = {
                     "name": inst_name,
-                    "machineType": f"zones/{zone}/machineTypes/{self.machine_type}",
+                    "machineType": f"zones/{zone}/machineTypes/{gce_mt}",
                     "scheduling": {
                         "provisioningModel": "SPOT",
                         "instanceTerminationAction": "STOP",
@@ -1120,21 +1181,19 @@ class ScanningSession:
                     },
                     "disks": [{"boot": True, "autoDelete": True,
                                "initializeParams": {
-                                   "sourceImage": "projects/debian-cloud/global/images/family/debian-12",
+                                   "sourceImage": source_image,
                                    "diskSizeGb": "50",
+                                   "diskType": disk_type,
                                }}],
-                    "networkInterfaces": [{
-                        "network": network,
-                        **({"subnetwork": subnetwork} if subnetwork else {}),
-                        "accessConfigs": [{"type": "ONE_TO_ONE_NAT", "name": "External NAT"}],
-                    }],
+                    "networkInterfaces": [net_iface],
                 }
                 if machine_info.get("accelerator_type"):
-
                     body["guestAccelerators"] = [{
                         "acceleratorType": f"zones/{zone}/acceleratorTypes/{machine_info['accelerator_type']}",
                         "acceleratorCount": machine_info["gpu_count"],
                     }]
+                    body["scheduling"]["onHostMaintenance"] = "TERMINATE"
+                elif family in ("Z3",) or gce_mt.lower().endswith("-lssd") or gce_mt.lower().startswith("z3-"):
                     body["scheduling"]["onHostMaintenance"] = "TERMINATE"
 
             body["labels"] = self._tracking_labels("spot")

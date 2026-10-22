@@ -306,14 +306,15 @@ async def _query_calendar_advisory_region(
     min_duration_secs = duration_min_days * 86400
     max_duration_secs = duration_max_days * 86400
 
-    from gpu_data import MACHINE_TO_FAMILY
+    from gpu_data import MACHINE_TO_FAMILY, get_gce_machine_type
     tpu_info = _get_tpu_info(machine_type)
+    gce_mt = get_gce_machine_type(machine_type)
 
-    # Both GPU and TPU use specificSkuResources with their machine type
+    # GPU, TPU, and CPU use specificSkuResources with their GCE machine type
     target_resources = {
         "specificSkuResources": {
             "instanceCount": str(vm_count),
-            "machineType": machine_type,
+            "machineType": gce_mt,
         }
     }
     if tpu_info:
@@ -441,11 +442,13 @@ async def _calendar_advisory_gcloud_fallback(
     vm_count: int, start_time: str, end_time: str,
 ) -> list[dict]:
     """Fallback to gcloud CLI for calendar advisory."""
+    from gpu_data import get_gce_machine_type
+    gce_mt = get_gce_machine_type(machine_type)
     cmd = [
         "gcloud", "beta", "compute", "advice", "calendar-mode",
         f"--project={project}",
         f"--region={region}",
-        f"--machine-type={machine_type}",
+        f"--machine-type={gce_mt}",
         f"--vm-count={vm_count}",
         f"--start-time={start_time}",
         f"--end-time={end_time}",
@@ -543,8 +546,13 @@ async def get_spot_advisory(
         target_regions.update(regions)
 
     if not target_regions:
-        results["errors"].append("No regions or zones specified for spot advisory.")
-        return results
+        from gpu_data import get_zones_for_machine_type
+        auto_zones = get_zones_for_machine_type(machine_type)
+        if auto_zones:
+            target_regions = set(z.rsplit("-", 1)[0] for z in auto_zones)
+        else:
+            results["errors"].append("No regions or zones specified for spot advisory.")
+            return results
 
     token = user_token or await get_gcloud_access_token()
 
@@ -576,7 +584,7 @@ async def _query_spot_advisory_region(
     Endpoint: POST .../regions/{region}/advice/capacity
     """
     import httpx
-    from gpu_data import MACHINE_TYPES
+    from gpu_data import MACHINE_TYPES, get_gce_machine_type
 
     url = (
         f"https://compute.googleapis.com/compute/alpha/projects/{project}"
@@ -597,6 +605,7 @@ async def _query_spot_advisory_region(
         }
     }
     machine_info = MACHINE_TYPES.get(machine_type, {})
+    gce_mt = get_gce_machine_type(machine_type)
     accel_type = machine_info.get("accelerator_type")
     if accel_type:
         gpu_count = machine_info.get("gpu_count", 1)
@@ -610,7 +619,7 @@ async def _query_spot_advisory_region(
         "instanceFlexibilityPolicy": {
             "instanceSelections": {
                 "instance-selection-1": {
-                    "machineTypes": [machine_type],
+                    "machineTypes": [gce_mt],
                 }
             }
         },
@@ -807,8 +816,13 @@ async def get_flex_advisory(
     target_regions, allowed_zones = _resolve_regions_zones(regions, zones)
 
     if not target_regions:
-        results["errors"].append("No regions or zones specified for flex advisory.")
-        return results
+        from gpu_data import get_zones_for_machine_type
+        auto_zones = get_zones_for_machine_type(machine_type)
+        if auto_zones:
+            target_regions = set(z.rsplit("-", 1)[0] for z in auto_zones)
+        else:
+            results["errors"].append("No regions or zones specified for flex advisory.")
+            return results
 
     token = user_token or await get_gcloud_access_token()
 
@@ -843,7 +857,7 @@ async def _query_flex_advisory_region(
     Endpoint: POST .../compute/alpha/projects/{project}/regions/{region}/advice/capacity
     """
     import httpx
-    from gpu_data import MACHINE_TYPES
+    from gpu_data import MACHINE_TYPES, get_gce_machine_type
 
     url = (
         f"https://compute.googleapis.com/compute/alpha/projects/{project}"
@@ -863,6 +877,7 @@ async def _query_flex_advisory_region(
     }
     # Guest-accelerator GPUs (T4, L4) must be requested explicitly
     machine_info = MACHINE_TYPES.get(machine_type, {})
+    gce_mt = get_gce_machine_type(machine_type)
     accel_type = machine_info.get("accelerator_type")
     if accel_type:
         gpu_count = machine_info.get("gpu_count", 1)
@@ -876,7 +891,7 @@ async def _query_flex_advisory_region(
         "instanceFlexibilityPolicy": {
             "instanceSelections": {
                 "instance-selection-1": {
-                    "machineTypes": [machine_type],
+                    "machineTypes": [gce_mt],
                 }
             }
         },
@@ -973,11 +988,13 @@ async def _spot_advisory_gcloud_fallback(
     project: str, region: str, machine_type: str
 ) -> list[dict]:
     """Fallback to gcloud CLI for spot advisory."""
+    from gpu_data import get_gce_machine_type
+    gce_mt = get_gce_machine_type(machine_type)
     cmd = [
         "gcloud", "alpha", "compute", "advice", "spot-resources",
         f"--project={project}",
         f"--region={region}",
-        f"--instance-type={machine_type}",
+        f"--instance-type={gce_mt}",
         "--format=json",
     ]
 

@@ -218,7 +218,7 @@ export default function App() {
               <Box sx={{ width: 3, height: 18, borderRadius: 1, bgcolor: '#34a853' }} />
             </Box>
             <Typography variant="h3" sx={{ color: '#202124', fontWeight: 500, fontSize: '1.125rem', fontFamily: '"Google Sans", "Roboto", sans-serif' }}>
-              Capacity Radar
+              SuperDry Capacity Agent
             </Typography>
           </Box>
           <Box sx={{ flexGrow: 1 }} />
@@ -546,7 +546,7 @@ export default function App() {
           {/* Footer */}
           <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'block', textAlign: 'center' }}>
-              Capacity Radar &mdash; GPU/TPU Capacity Hunting Tool
+              SuperDry Capacity Agent &mdash; Compute Capacity Hunting Tool
             </Typography>
           </Box>
         </Drawer>
@@ -613,8 +613,8 @@ export default function App() {
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2, color: '#5f6368' }}>
-            This is a hosted demo of <strong>Capacity Radar</strong>. Authentication, project switching,
-            and GPU/TPU deployment are disabled in this version.
+            This is a hosted demo of <strong>SuperDry Capacity Agent</strong>. Authentication, project switching,
+            and compute deployment are disabled in this version.
           </Typography>
 
           <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600, color: '#3c4043' }}>

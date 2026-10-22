@@ -98,10 +98,28 @@ export default function ScanningPanel({ machineTypes = [], loading: mtLoading, p
   const wsRef = useRef(null)
   const logContainerRef = useRef(null)
 
-  // Machine type info
+  const allKnownZones = useMemo(() => {
+    const zSet = new Set()
+    machineTypes.forEach(mt => (mt.zones || []).forEach(z => zSet.add(z)))
+    return Array.from(zSet).sort()
+  }, [machineTypes])
+
+  // Machine type info (with fallback for custom GCE machine types)
   const selectedMachineInfo = useMemo(() => {
-    return machineTypes.find(mt => mt.machineType === machineType)
-  }, [machineType, machineTypes])
+    if (!machineType) return null
+    const found = machineTypes.find(mt => mt.machineType === machineType)
+    if (found) return found
+    return {
+      machineType,
+      family: 'Custom',
+      category: 'Custom',
+      gpu: 'Custom GCE Machine Type',
+      chip: 'Custom',
+      gpuCount: 0,
+      zones: allKnownZones,
+      supported: { on_demand: true, spot: true, dws_calendar: true, dws_flex: true },
+    }
+  }, [machineType, machineTypes, allKnownZones])
 
   const availableZones = useMemo(() => {
     return selectedMachineInfo?.zones || []
