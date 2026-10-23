@@ -367,30 +367,6 @@ gcloud auth application-default login         # one-time auth (or use the skill'
   creates **real, billable** resources, so the skill requires explicit
   confirmation (`--yes`) before it will proceed.
 
-### Run the CLI directly (no agent required)
-
-```bash
-# Auth + discovery
-python skills/capacity-radar/scripts/capacity_radar.py auth check --project my-project
-python skills/capacity-radar/scripts/capacity_radar.py catalog chips
-python skills/capacity-radar/scripts/capacity_radar.py catalog zones --machine-type c4-standard-16
-python skills/capacity-radar/scripts/capacity_radar.py catalog networks --project my-project --region us-central1
-
-# Advisories (GPU or CPU)
-python skills/capacity-radar/scripts/capacity_radar.py advise spot --project my-project --machine-type a3-highgpu-8g --regions us-central1
-python skills/capacity-radar/scripts/capacity_radar.py advise spot --project my-project --machine-type c4-standard-8 --regions us-central1
-python skills/capacity-radar/scripts/capacity_radar.py advise flex --project my-project --machine-type a3-highgpu-8g --size 4 --max-run-hours 24 --regions us-central1
-
-# Deploy (creates real resources — requires --yes)
-python skills/capacity-radar/scripts/capacity_radar.py deploy \
-  --project my-project --machine-type a3-highgpu-8g --vm-count 2 \
-  --priority spot:us-central1-b,us-east4-a --priority dws_flex:us-central1-b --yes
-
-python skills/capacity-radar/scripts/capacity_radar.py deploy \
-  --project my-project --machine-type c4-standard-16 --vm-count 4 \
-  --priority on_demand:us-central1-a,us-central1-b --priority spot:us-central1-a --yes
-```
-
 See **[`skills/capacity-radar/SKILL.md`](skills/capacity-radar/SKILL.md)** for the
 full agent workflow, command reference, and safety rules.
 
