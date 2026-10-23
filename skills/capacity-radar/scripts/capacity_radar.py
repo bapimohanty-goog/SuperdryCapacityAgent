@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Capacity Radar CLI — a portable command-line wrapper around the Capacity Radar
-engine so that AI agents (or humans) can drive ALL of the app's functionality
-from the terminal / chat:
+SuperDry Capacity Agent CLI — a portable command-line wrapper around the
+SuperDry Capacity Agent engine so that AI agents (or humans) can drive ALL of
+the app's functionality from the terminal / chat:
 
   • auth        — check / trigger Google Cloud authentication (ADC)
-  • catalog     — list supported GPU/TPU machine types, chips, and zones
+  • catalog     — list supported GPU, TPU, and CPU machine types, series, and zones
   • advise      — run capacity advisories (calendar | spot | flex)
   • deploy      — run a priority-based scan & deploy strategy (real resources!)
 
@@ -371,7 +371,7 @@ def cmd_deploy(args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="capacity_radar.py",
-        description="Capacity Radar CLI — auth, advisories, and priority-based deploy for GCP GPUs/TPUs.",
+        description="SuperDry Capacity Agent CLI — auth, advisories, and priority-based deploy for GCP GPUs, TPUs, and CPUs.",
     )
     sub = p.add_subparsers(dest="group", required=True)
 
@@ -385,11 +385,11 @@ def build_parser():
     a_login.set_defaults(func=cmd_auth_login)
 
     # catalog
-    cat = sub.add_parser("catalog", help="List machine types, chips, and zones")
+    cat = sub.add_parser("catalog", help="List machine types, chips/series, and zones")
     cat_sub = cat.add_subparsers(dest="cmd", required=True)
-    c_mt = cat_sub.add_parser("machine-types", help="All GPU/TPU machine types + support matrix")
+    c_mt = cat_sub.add_parser("machine-types", help="All GPU/TPU/CPU machine types + support matrix")
     c_mt.set_defaults(func=cmd_catalog_machine_types)
-    c_chips = cat_sub.add_parser("chips", help="Machine types grouped by chip")
+    c_chips = cat_sub.add_parser("chips", help="Machine types grouped by category and chip/series")
     c_chips.set_defaults(func=cmd_catalog_chips)
     c_zones = cat_sub.add_parser("zones", help="Supported zones for a machine type")
     c_zones.add_argument("--machine-type", required=True)

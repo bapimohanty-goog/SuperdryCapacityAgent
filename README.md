@@ -17,6 +17,7 @@ SuperDry Capacity Agent automates finding and securing compute capacity across G
 - **All Compute Categories Supported** — Choose from **370 preset configurations** across 6 categories (**GPU**, **TPU**, **General Purpose CPU**, **Compute-Optimized CPU**, **Memory-Optimized CPU**, **Storage-Optimized CPU**) or enter any **Custom / Search** GCE machine type (e.g., `n2-custom-8-32768`, `c3-standard-8-lssd`)
 - **Priority-based scanning** — Define up to 4 priorities (e.g., try On-Demand first, then DWS Calendar, then Spot)
 - **Multi-zone scanning** — Automatically tries all supported zones for the chosen machine type
+- **VPC Network & Subnetwork selection** — Auto-resolves a usable VPC network (prefers `default`, or falls back to the first VPC with a subnet in the target region), lets you pick any existing VPC/subnetwork, or creates a new auto-mode VPC network directly from the UI
 - **Automatic hardware-aware provisioning** — Automatically configures `hyperdisk-balanced` + `GVNIC` for 4th-gen families (`C4`, `C4A`, `C4D`, `N4`, `H3`, `M4`, `X4`, `Z3`), `GVNIC` for 3rd-gen families (`C3`, `C3D`, `M3`), Arm64 OS images (`debian-12-arm64`) for Arm series (`C4A`, `T2A`), and `guestAccelerators` attachment for N1-attached GPUs (`T4`, `V100`)
 - **Real-time progress** — WebSocket-based live updates with detailed step-by-step logs
 - **Sequential or Parallel** execution modes
@@ -123,7 +124,7 @@ Use the **Search / Custom** tab in the UI (or pass any GCE machine type string t
 ## Two ways to use it
 
 SuperDry Capacity Agent can be used **either** as a web app **or** as an **AI Agent Skill**
-(drive everything from chat in an agent like Claude, Google Antigravity, etc.).
+(drive everything from chat in Google Antigravity or Gemini CLI).
 
 - **Web app** — run the FastAPI backend + React UI (see Quick Start below).
 - **Agent Skill** — install the bundled skill so an AI agent can authenticate,
@@ -238,6 +239,8 @@ SuperdryCapacityAgent/
 | `GET` | `/api/machine-types` | List all 370 preset GPU/TPU/CPU machine types with zone info |
 | `GET` | `/api/chip-groups` | Machine types grouped by category and chip/series for the selector |
 | `GET` | `/api/machine-types/{type}/zones` | Zones and metadata for a preset or custom GCE machine type |
+| `GET` | `/api/networks` | List VPC networks and regional subnetworks in a project |
+| `POST` | `/api/networks/create` | Create a new auto-mode VPC network in the project |
 | `POST` | `/api/advisory/calendar` | Query DWS Calendar Advisory API |
 | `POST` | `/api/advisory/calendar/splits` | Find best capacity split plan |
 | `POST` | `/api/advisory/spot` | Query Spot VM Advisory API |
@@ -283,16 +286,17 @@ uvicorn.run(app, host="0.0.0.0", port=8000)  # Change 8000
 2. **Connect** — Enter your GCP Project ID and click "Connect"
 3. **Select machine type** — Pick a Category (**GPU**, **TPU**, **General Purpose**, **Compute-Opt**, **Memory-Opt**, **Storage-Opt**, or **Search / Custom**) → Chip / Series → Machine Type (or search/enter any custom GCE machine type)
 4. **Set VM count** — Min and Max VMs (system tries max first, scales down to min)
-5. **Add priorities** — Each priority specifies:
+5. **Select VPC Network / Subnetwork (optional)** — Leave on **Auto** (uses `default` VPC or the first VPC with a subnet in the target region), choose a specific VPC and subnetwork, or click **Create new VPC** if the project has no `default` network
+6. **Add priorities** — Each priority specifies:
    - Consumption method (On-Demand, DWS Calendar, DWS Flex, Spot — automatically filtered to methods supported by the selected hardware)
    - Target zones (leave empty = try all available)
    - Retry rounds and interval
    - Optional resource name prefix
-6. **Method-specific settings**:
+7. **Method-specific settings**:
    - **DWS Calendar**: Start/end times for the reservation window
    - **DWS Flex**: Max wait time and usage duration
-7. Choose **Sequential** or **Parallel** execution
-8. Click **Start Scan & Deploy**
+8. Choose **Sequential** or **Parallel** execution
+9. Click **Start Scan & Deploy**
 
 ### Using the Advisory Tab
 
@@ -326,12 +330,11 @@ Calendar future reservations use `reservationMode: CALENDAR` with DENSE deployme
 
 ## Use as an Agent Skill
 
-SuperDry Capacity Agent ships with a self-contained **AI Agent Skill** so any agent (e.g.
-Claude, Google Antigravity, or other agentic IDEs) can drive **all** of the app's
-functionality through chat — authenticate, run any advisory (Calendar / Spot /
-DWS Flex, any chip/series/region/size), and configure + launch a priority-based
-deployment — asking the user follow-up questions for any missing input, exactly
-like the web UI.
+SuperDry Capacity Agent ships with a self-contained **AI Agent Skill** so Google Antigravity
+and Gemini agents can drive **all** of the app's functionality through chat —
+authenticate, run any advisory (Calendar / Spot / DWS Flex, any chip/series/region/size),
+and configure + launch a priority-based deployment — asking the user follow-up
+questions for any missing input, exactly like the web UI.
 
 The skill lives in **[`skills/capacity-radar/`](skills/capacity-radar/)** and is
 built as a `SKILL.md` plus a portable CLI (`scripts/capacity_radar.py`) that
@@ -357,10 +360,10 @@ gcloud auth application-default login         # one-time auth (or use the skill'
 ### What the agent can do
 
 - **Authenticate** — check ADC + project access; help the user log in if needed.
-- **Discover** — list GPU/TPU/CPU chips & series, machine types, and supported zones.
+- **Discover** — list all 370 preset GPU/TPU/CPU machine types (grouped by category and chip/series), supported zones (including custom GCE machine types), and project VPC networks/subnetworks.
 - **Advise (safe / read-only)** — Spot, DWS Calendar (+ best-split plan), and
   DWS Flex Start (Preview / whitelisted) advisories for any machine type/region/size.
-- **Deploy** — priority-based scan & deploy (sequential or parallel). This
+- **Deploy** — priority-based scan & deploy (sequential or parallel) across any GPU, TPU, CPU, or Custom GCE machine type. This
   creates **real, billable** resources, so the skill requires explicit
   confirmation (`--yes`) before it will proceed.
 
@@ -370,6 +373,8 @@ gcloud auth application-default login         # one-time auth (or use the skill'
 # Auth + discovery
 python skills/capacity-radar/scripts/capacity_radar.py auth check --project my-project
 python skills/capacity-radar/scripts/capacity_radar.py catalog chips
+python skills/capacity-radar/scripts/capacity_radar.py catalog zones --machine-type c4-standard-16
+python skills/capacity-radar/scripts/capacity_radar.py catalog networks --project my-project --region us-central1
 
 # Advisories (GPU or CPU)
 python skills/capacity-radar/scripts/capacity_radar.py advise spot --project my-project --machine-type a3-highgpu-8g --regions us-central1

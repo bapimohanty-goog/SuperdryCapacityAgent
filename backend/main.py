@@ -161,7 +161,7 @@ async def get_config():
         "authMode": "user" if USER_AUTH_MODE else "local",
         "oauthClientId": OAUTH_CLIENT_ID,
         "project": DEFAULT_PROJECT if DEMO_MODE else "",
-        "repoUrl": "https://github.com/MG-Cafe/capacity_radar",
+        "repoUrl": "https://github.com/bapimohanty-goog/SuperdryCapacityAgent",
     }
 
 

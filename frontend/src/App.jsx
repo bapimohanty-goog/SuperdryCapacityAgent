@@ -629,7 +629,7 @@ export default function App() {
           </Typography>
           <Box sx={{ bgcolor: '#f8f9fa', borderRadius: 1, p: 2, border: '1px solid #e8eaed' }}>
             {[
-              { step: '1', label: 'Clone the repo', cmd: `git clone ${repoUrl || 'https://github.com/MG-Cafe/capacity_radar.git'} && cd capacity_radar` },
+              { step: '1', label: 'Clone the repo', cmd: `git clone ${repoUrl || 'https://github.com/bapimohanty-goog/SuperdryCapacityAgent.git'} && cd SuperdryCapacityAgent` },
               { step: '2', label: 'Authenticate', cmd: 'gcloud auth application-default login' },
               { step: '3', label: 'Set project (optional)', cmd: 'gcloud config set project YOUR_PROJECT_ID' },
               { step: '4', label: 'Install backend deps', cmd: 'cd backend && pip install -r requirements.txt' },
